@@ -5,38 +5,49 @@ from sklearn.preprocessing import OneHotEncoder
 import joblib
 import os
 
-# Step 1: Load dataset
+# Load the dataset
 df = pd.read_csv("ipl_colab.csv")
-print(" Dataset loaded. Shape:", df.shape)
 
-# Step 2: Keep required columns only
+# Keep only necessary columns
 df = df[['batting_team', 'bowling_team', 'runs', 'wickets', 'overs', 'runs_last_5', 'wickets_last_5', 'total']]
-df.dropna(inplace=True)
 
-# Step 3: Encode teams (OneHotEncoder with drop='first' for consistency)
-teams = sorted(df['batting_team'].unique())
-encoder = OneHotEncoder(handle_unknown='ignore', drop='first')
-encoded_teams = encoder.fit_transform(df[['batting_team', 'bowling_team']]).toarray()
+# Filter to valid consistent IPL teams
+valid_teams = [
+    'Chennai Super Kings', 'Delhi Daredevils', 'Kings XI Punjab', 'Kolkata Knight Riders',
+    'Mumbai Indians', 'Rajasthan Royals', 'Royal Challengers Bangalore', 'Sunrisers Hyderabad'
+]
+df = df[df['batting_team'].isin(valid_teams) & df['bowling_team'].isin(valid_teams)]
 
-# Step 4: Prepare input features
-numerical_data = df[['runs', 'wickets', 'overs', 'runs_last_5', 'wickets_last_5']].values
-X = pd.DataFrame(encoded_teams)
-X = pd.concat([X, pd.DataFrame(numerical_data)], axis=1)
+# Split into features and label
+X = df.drop('total', axis=1)
 y = df['total']
 
-# Step 5: Split dataset
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+# One-hot encode the team names (batting + bowling), drop first to prevent dummy trap
+encoder = OneHotEncoder(categories=[valid_teams, valid_teams], drop='first', sparse_output=False)
+teams_encoded = encoder.fit_transform(X[['batting_team', 'bowling_team']])
 
-# Step 6: Train the model
+# Generate column names for encoded features
+encoded_columns = (
+    [f"batting_{team}" for team in valid_teams[1:]] +
+    [f"bowling_{team}" for team in valid_teams[1:]]
+)
+encoded_df = pd.DataFrame(teams_encoded, columns=encoded_columns)
+
+# Extract and reset numerical feature index
+numerical = X[['runs', 'wickets', 'overs', 'runs_last_5', 'wickets_last_5']].reset_index(drop=True)
+
+# Combine encoded and numerical features
+X_final = pd.concat([encoded_df, numerical], axis=1)
+
+# Train-test split
+X_train, X_test, y_train, y_test = train_test_split(X_final, y, test_size=0.2, random_state=42)
+
+# Train the Random Forest model
 model = RandomForestRegressor(n_estimators=100, random_state=42)
 model.fit(X_train, y_train)
-print(" Model training complete.")
 
-# Step 7: Save model with compression
+# Save the model
 os.makedirs("model", exist_ok=True)
-joblib.dump(model, 'model/ipl_score_predictor_model.pkl', compress=9)
-print(" Model saved to model/ipl_score_predictor_model.pkl")
+joblib.dump(model, "model/ipl_score_predictor_model.pkl")
 
-# (Optional) Save encoder if needed for web input encoding
-joblib.dump(encoder, 'model/team_encoder.pkl')
-print(" Encoder saved to model/team_encoder.pkl")
+print(" Model trained and saved to 'model/ipl_score_predictor_model.pkl'")
